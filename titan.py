@@ -28,6 +28,7 @@ try:
     from modules.dirrec import hammer
     from modules.wayback import timetravel
     from modules.reporter import save_report
+    from modules.client import TitanClient
     MODULES_LOADED = True
 except ImportError as e:
     MODULES_LOADED = False
@@ -138,6 +139,7 @@ async def run_titan_async():
 
     target, wordlist, nmap_flags = get_config()
     hostname = target.replace("http://", "").replace("https://", "").split("/")[0]
+    import socket # Ensure socket is available for AF_INET
     
     # Shared Data
     scan_data = {'waf': 'Pending...', 'ports': [], 'subdomains': [], 'dir_enum': []}
@@ -158,111 +160,131 @@ async def run_titan_async():
     async def engine_task():
         add_log(f"Initializing TitanRecon on {target}...")
         
-        # 1. Critical Checks
-        module_status["WAF"] = "[yellow]Scanning[/yellow]"
-        try: 
-            await detect_waf(target, scan_data, add_log)
-            module_status["WAF"] = "[green]Done[/green]"
-        except Exception as e: module_status["WAF"] = f"[red]Error: {e}[/red]"
-        
-        # 2. Parallel Passive Recon
-        add_log("Launching Passive Modules...")
-        
-        passive_tasks = []
-        
-        # Headers
-        async def task_headers():
-            module_status["Headers"] = "[yellow]Fetching[/yellow]"
-            await headers(target, None, scan_data)
-            module_status["Headers"] = "[green]Done[/green]"
-        passive_tasks.append(task_headers())
+        # Initialize Client
+        client = TitanClient()
+        await client.start()
 
-        # SSL
-        async def task_ssl():
-            module_status["SSL"] = "[yellow]Fetching[/yellow]"
-            await cert(hostname, 443, None, scan_data)
-            module_status["SSL"] = "[green]Done[/green]"
-        passive_tasks.append(task_ssl())
+        try:
+            # 1. Critical Checks
+            module_status["WAF"] = "[yellow]Scanning[/yellow]"
+            try: 
+                await detect_waf(target, scan_data, add_log, client)
+                module_status["WAF"] = "[green]Done[/green]"
+            except Exception as e: module_status["WAF"] = f"[red]Error: {e}[/red]"
+            
+            # 2. Parallel Passive Recon
+            add_log("Launching Passive Modules...")
+            
+            passive_tasks = []
+            
+            # Headers
+            async def task_headers():
+                module_status["Headers"] = "[yellow]Fetching[/yellow]"
+                await headers(target, None, scan_data, client)
+                module_status["Headers"] = "[green]Done[/green]"
+            passive_tasks.append(task_headers())
 
-        # Whois
-        async def task_whois():
-            module_status["Whois"] = "[yellow]Fetching[/yellow]"
-            parts = hostname.split('.')
-            if len(parts) >= 2:
-                await whois_lookup(parts[-2], parts[-1], None, None, scan_data)
-            module_status["Whois"] = "[green]Done[/green]"
-        passive_tasks.append(task_whois())
+            # SSL
+            async def task_ssl():
+                module_status["SSL"] = "[yellow]Fetching[/yellow]"
+                await cert(hostname, 443, None, scan_data)
+                module_status["SSL"] = "[green]Done[/green]"
+            passive_tasks.append(task_ssl())
 
-        # Subdomains
-        async def task_subdomains():
-            module_status["Subdomains"] = "[yellow]Fetching[/yellow]"
-            # Pass add_log as the logger argument
-            await subdomains(hostname, 20, None, scan_data, None, logger=add_log)
-            module_status["Subdomains"] = "[green]Done[/green]"
-        passive_tasks.append(task_subdomains())
+            # Whois
+            async def task_whois():
+                module_status["Whois"] = "[yellow]Fetching[/yellow]"
+                # Just query the full hostname, python-whois handles logic better than naive split
+                await whois_lookup(hostname, "", None, None, scan_data)
+                module_status["Whois"] = "[green]Done[/green]"
+            passive_tasks.append(task_whois())
 
-        # Wayback
-        async def task_wayback():
-             module_status["Wayback"] = "[yellow]Archiving[/yellow]"
-             await timetravel(target, scan_data, None)
-             module_status["Wayback"] = "[green]Done[/green]"
-        passive_tasks.append(task_wayback())
+            # Subdomains
+            async def task_subdomains():
+                module_status["Subdomains"] = "[yellow]Fetching[/yellow]"
+                # Pass add_log as the logger argument
+                await subdomains(hostname, 20, None, scan_data, None, logger=add_log, client=client)
+                module_status["Subdomains"] = "[green]Done[/green]"
+            passive_tasks.append(task_subdomains())
 
-        await asyncio.gather(*passive_tasks)
-        add_log("[+] Passive Recon Completed.")
+            # Wayback
+            async def task_wayback():
+                 module_status["Wayback"] = "[yellow]Archiving[/yellow]"
+                 await timetravel(target, scan_data, None, client)
+                 module_status["Wayback"] = "[green]Done[/green]"
+            passive_tasks.append(task_wayback())
 
-        # 3. Active Scanning (DNS + DirEnum + Ports concurrently? maybe too noisy. Let's group DNS and others)
-        
-        # DNS
-        async def task_dns():
-            module_status["DNS"] = "[yellow]Bruteforcing[/yellow]"
-            await dnsrec(hostname, wordlist, None, scan_data, add_log)
-            module_status["DNS"] = "[green]Done[/green]"
+            await asyncio.gather(*passive_tasks)
+            add_log("[+] Passive Recon Completed.")
 
-        # DirEnum
-        async def task_dir():
-            module_status["DirEnum"] = "[bold magenta]Enumerating[/bold magenta]"
-            await hammer(target, 10, 5, None, False, False, None, scan_data, "php", add_log, wordlist)
-            module_status["DirEnum"] = "[green]Done[/green]"
+            # 3. Active Scanning (DNS + DirEnum + Ports concurrently? maybe too noisy. Let's group DNS and others)
+            
+            # DNS
+            async def task_dns():
+                module_status["DNS"] = "[yellow]Bruteforcing[/yellow]"
+                await dnsrec(hostname, wordlist, None, scan_data, add_log)
+                module_status["DNS"] = "[green]Done[/green]"
 
-        # Ports
-        async def task_ports():
-            if nmap_flags:
-                module_status["Ports"] = "[bold red]Scanning[/bold red]"
-                # Need IP for nmap? The old code did resolution. Portscan handles it or we pass hostname?
-                # The old code did: ip = socket.gethostbyname(hostname) before calling scan.
-                # Let's resolve async or just let nmap handle hostname (slower but works).
-                # But to allow nmap -Pn... pass IP or hostname is fine for nmap usually. 
-                # Let's use hostname directly for simplicity, or confirm IP.
-                # Since we already ran DNS, we might have it.
-                # But standard resolution:
-                try:
-                    # Async resolution
-                    loop = asyncio.get_running_loop()
+            # DirEnum
+            async def task_dir():
+                module_status["DirEnum"] = "[bold magenta]Enumerating[/bold magenta]"
+                await hammer(target, 10, 5, None, False, False, None, scan_data, "php", add_log, wordlist, client)
+                module_status["DirEnum"] = "[green]Done[/green]"
+
+            # Ports
+            async def task_ports():
+                if nmap_flags:
+                    module_status["Ports"] = "[bold red]Scanning[/bold red]"
+                    # Need IP for nmap? The old code did resolution. Portscan handles it or we pass hostname?
+                    # The old code did: ip = socket.gethostbyname(hostname) before calling scan.
+                    # Let's resolve async or just let nmap handle hostname (slower but works).
+                    # But to allow nmap -Pn... pass IP or hostname is fine for nmap usually. 
+                    # Let's use hostname directly for simplicity, or confirm IP.
+                    # Since we already ran DNS, we might have it.
+                    # But standard resolution:
                     try:
-                        ip_info = await loop.getaddrinfo(hostname, None)
-                        ip = ip_info[0][4][0]
-                    except: ip = hostname
-                    
-                    await scan(ip, None, scan_data, None, add_log, nmap_flags)
-                    module_status["Ports"] = "[green]Done[/green]"
-                except Exception as e:
-                     module_status["Ports"] = f"[red]Error[/red]"
-                     add_log(f"[-] Portscan error: {e}")
-            else:
-                module_status["Ports"] = "[dim]Skipped[/dim]"
+                        # Async resolution - Force IPv4
+                        loop = asyncio.get_running_loop()
+                        try:
+                            ip_info = await loop.getaddrinfo(hostname, None, family=socket.AF_INET)
+                            ips = set()
+                            for info in ip_info:
+                                # info[4][0] is the IP address
+                                ips.add(info[4][0])
+                            
+                            if not ips: ips.add(hostname)
+                            
+                            scan_tasks = []
+                            for ip in ips:
+                                scan_tasks.append(scan(ip, None, scan_data, None, add_log, nmap_flags))
+                                
+                            if scan_tasks:
+                                await asyncio.gather(*scan_tasks)
+                                
+                        except Exception as e:
+                             # Fallback to hostname if resolution fails
+                             await scan(hostname, None, scan_data, None, add_log, nmap_flags)
+                        module_status["Ports"] = "[green]Done[/green]"
+                    except Exception as e:
+                         module_status["Ports"] = f"[red]Error[/red]"
+                         add_log(f"[-] Portscan error: {e}")
+                else:
+                    module_status["Ports"] = "[dim]Skipped[/dim]"
 
-        # Launch active tasks
-        # We can run DNS, Dir, Ports in parallel if the user wants "Full" speed.
-        # But logging might get mixed. The UI handles it.
-        # Let's run them:
-        active_tasks = [task_dns(), task_dir(), task_ports()]
-        await asyncio.gather(*active_tasks)
+            # Launch active tasks
+            # We can run DNS, Dir, Ports in parallel if the user wants "Full" speed.
+            # But logging might get mixed. The UI handles it.
+            # Let's run them:
+            active_tasks = [task_dns(), task_dir(), task_ports()]
+            await asyncio.gather(*active_tasks)
 
-        add_log("Scan Finished. Generating Report...")
-        report_file = save_report(scan_data, target)
-        add_log(f"Report saved: {report_file}")
-        status_log["Finished"] = True
+            add_log("Scan Finished. Generating Report...")
+            report_file = save_report(scan_data, target)
+            add_log(f"Report saved: {report_file}")
+            
+            status_log["Finished"] = True
+        finally:
+            await client.close()
 
     # Start the engine task
     loop = asyncio.get_running_loop()
@@ -275,9 +297,6 @@ async def run_titan_async():
         while not scan_task.done():
             live.update(create_layout(target, status_log, scan_data, module_status, start_time, 0))
             await asyncio.sleep(0.1)
-        
-        # One last update
-        live.update(create_layout(target, status_log, scan_data, module_status, start_time, 0))
         
     # Check for exceptions
     if scan_task.exception():

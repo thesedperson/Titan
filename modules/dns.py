@@ -18,14 +18,25 @@ async def dnsrec(hostname, wordlist_path, out_settings, data, logger=None):
     
     sem = asyncio.Semaphore(100) # Limit concurrent queries
 
+    import re
+    # Valid subdomain regex (simple)
+    sub_pattern = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$')
+
     async def check_subdomain(sub):
+        # Sanitize: Web content lists have filenames like "index.php", "style.css", ".config"
+        # We only want valid subdomains.
+        # If it contains dots, it might be a multi-level subdomain or a file.
+        # Strict validation: alphaneumeric and dashes only for standard brute force.
+        if not sub_pattern.match(sub):
+             return None
+
         target = f"{sub}.{hostname}"
         async with sem:
             try:
                 result = await resolver.query(target, 'A')
                 ips = [r.host for r in result]
                 return (target, ips)
-            except: 
+            except Exception: # Catch all, including DNSError
                 return None
 
     tasks = [check_subdomain(w) for w in words]

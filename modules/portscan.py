@@ -7,6 +7,9 @@ async def scan(ip, out_settings, data, threads, logger=None, nmap_flags="-sV -T4
         if logger: logger("[-] Nmap binary not found!")
         return
 
+    if ":" in ip:
+        nmap_flags += " -6"
+        
     cmd = f"nmap {nmap_flags} -Pn -v {ip}"
     if logger: logger(f"[*] Executing: {cmd}")
     data['ports'] = []
@@ -22,7 +25,7 @@ async def scan(ip, out_settings, data, threads, logger=None, nmap_flags="-sV -T4
             line = await process.stdout.readline()
             if not line: break
             
-            line_str = line.decode('utf-8').strip()
+            line_str = line.decode('utf-8', errors='ignore').strip()
             if not line_str: continue
 
             if "Discovered open port" in line_str:
@@ -35,7 +38,8 @@ async def scan(ip, out_settings, data, threads, logger=None, nmap_flags="-sV -T4
                 try:
                     parts = re.split(r'\s+', line_str, maxsplit=3)
                     if len(parts) >= 3:
-                        entry = f"{parts[0].split('/')[0]} | {parts[1].upper()} | {parts[2]} | {parts[3] if len(parts)>3 else ''}"
+                        port = parts[0].split('/')[0]
+                        entry = f"{ip}:{port} | {parts[1].upper()} | {parts[2]} | {parts[3] if len(parts)>3 else ''}"
                         data['ports'].append(entry)
                 except: pass
         

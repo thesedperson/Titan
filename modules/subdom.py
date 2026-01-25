@@ -1,13 +1,14 @@
 import aiohttp
 import asyncio
 
-async def subdomains(hostname, tout, out_settings, data, conf_path, logger=None):
+async def subdomains(hostname, tout, out_settings, data, conf_path, logger, client):
     data['subdomains'] = []
     try:
         url = f"https://crt.sh/?q=%25.{hostname}&output=json"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=20) as res:
-                if res.status == 200:
+        
+        # Use client.get
+        async with client.get(url, timeout=20) as res:
+            if res.status == 200:
                     content = await res.json()
                     subs = set()
                     for item in content:

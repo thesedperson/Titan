@@ -7,7 +7,11 @@ async def cert(hostname, ssl_port, out_settings, data):
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         
-        reader, writer = await asyncio.open_connection(hostname, 443, ssl=context)
+        # Force IPv4 resolution
+        import socket
+        ip = socket.gethostbyname(hostname)
+        
+        reader, writer = await asyncio.open_connection(ip, 443, ssl=context, server_hostname=hostname)
         
         cert_bin = writer.get_extra_info('peercert')
         # get_extra_info returns the decoded dict if using ssl module, but sometimes binary?
