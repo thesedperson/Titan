@@ -1,0 +1,21 @@
+# --- Networking & Async ---
+aiohttp>=3.9.0         # For high-speed asynchronous HTTP requests
+aiodns>=3.1.0          # For non-blocking DNS resolution (faster than dnspython)
+requests>=2.31.0       # Fallback for standard synchronous requests
+dnspython>=2.4.0       # Standard DNS toolkit
+urllib3>=2.0.0         # Connection pooling
+
+# --- Scraping & Parsing ---
+beautifulsoup4>=4.12.0 # For scraping subdomains from HTML sources (like Yahoo/Google)
+tldextract>=3.6.0      # CRITICAL: Accurately separates subdomain, domain, and suffix
+lxml>=4.9.0            # Faster parser for BeautifulSoup
+
+# --- CLI & UX ---
+rich>=13.6.0           # Modern, beautiful terminal formatting (tables, colors)
+click>=8.1.0           # Better command-line argument management than argparse
+tqdm>=4.66.0           # Progress bars
+
+# --- Utilities ---
+fake-useragent>=1.3.0  # Randomizes User-Agents to avoid blocking
+idna>=3.4              # Handling internationalized domain names
+python-whois>=0.8.0    # For Whois lookups

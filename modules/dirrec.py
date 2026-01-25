@@ -1,26 +1,32 @@
-import requests, concurrent.futures, os
-def hammer(target, threads, timeout, out_settings, proxy, redirect, header, data, ext, logger=None, wordlist_path=None):
+import aiohttp
+import asyncio
+import os
+
+async def hammer(target, threads, timeout, out_settings, proxy, redirect, header, data, ext, logger=None, wordlist_path=None):
     if logger: logger("[*] Starting Directory Enumeration...")
     words = []
     if wordlist_path and os.path.exists(wordlist_path):
         try:
-            with open(wordlist_path, 'r', errors='ignore') as f: words = [line.strip() for line in f.readlines()[:2000]]
+            with open(wordlist_path, 'r', errors='ignore') as f: words = [line.strip() for line in f if line.strip()]
         except: pass
     if not words: words = ["admin", "login", "dashboard", "uploads", "images", "api", "config", "env"]
 
     data['dir_enum'] = []
-    def check_dir(path):
-        url = f"{target}/{path.lstrip('/')}"
-        try:
-            res = requests.head(url, timeout=3, allow_redirects=False)
-            if res.status_code in [200, 403]: return (url, res.status_code)
-        except: pass
-        return None
+    sem = asyncio.Semaphore(50) # Limit concurrent requests
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-        futures = {executor.submit(check_dir, w): w for w in words}
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
+    async with aiohttp.ClientSession() as session:
+        async def check_dir(path):
+            url = f"{target}/{path.lstrip('/')}"
+            async with sem:
+                try:
+                    async with session.head(url, timeout=5, allow_redirects=False, ssl=False) as res:
+                        if res.status in [200, 403]: return (url, res.status)
+                except: pass
+            return None
+
+        tasks = [check_dir(w) for w in words]
+        for future in asyncio.as_completed(tasks):
+            result = await future
             if result:
                 url, status = result
                 data['dir_enum'].append(f"[{status}] /{url.split('/')[-1]}")
