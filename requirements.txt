@@ -4,6 +4,7 @@ aiodns>=3.1.0          # For non-blocking DNS resolution (faster than dnspython)
 requests>=2.31.0       # Fallback for standard synchronous requests
 dnspython>=2.4.0       # Standard DNS toolkit
 urllib3>=2.0.0         # Connection pooling
+uvloop>=0.19.0; sys_platform == 'linux' # Ultra-fast event loop for Linux
 
 # --- Scraping & Parsing ---
 beautifulsoup4>=4.12.0 # For scraping subdomains from HTML sources (like Yahoo/Google)

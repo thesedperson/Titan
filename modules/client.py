@@ -76,6 +76,10 @@ class TitanClient:
             req_headers.update(kwargs['headers'])
             del kwargs['headers']
             
+        # Convert timeout int/float to ClientTimeout if present
+        if 'timeout' in kwargs and isinstance(kwargs['timeout'], (int, float)):
+             kwargs['timeout'] = aiohttp.ClientTimeout(total=kwargs['timeout'])
+            
         return self.session.get(url, headers=req_headers, **kwargs)
 
     def head(self, url, **kwargs):

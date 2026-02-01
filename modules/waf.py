@@ -17,7 +17,7 @@ async def detect_waf(target, data, logger, client):
             
             if detected:
                 det_str = ', '.join(list(set(detected)))
-                data['waf'] = f"[bold red]Detected: {det_str}[/bold red]"
+                data['waf'] = f"Detected: {det_str}"
                 logger(f"[!] WAF DETECTED: {det_str}")
             else:
                 data['waf'] = "None Detected"
@@ -36,9 +36,10 @@ async def detect_waf(target, data, logger, client):
                 ]
                 
                 bypassed = False
-                for b_head in bypass_headers_list:
+                for i, b_head in enumerate(bypass_headers_list):
                     try:
-                        async with client.get(target, headers=b_head) as retrying:
+                        if logger: logger(f"[-] WAF Bypass Attempt {i+1}...")
+                        async with client.get(target, headers=b_head, timeout=5) as retrying:
                             if retrying.status == 200:
                                 logger(f"[+] WAF Bypass Successful with {list(b_head.keys())[0]}!")
                                 data['waf'] += " (Bypassed)"
@@ -49,13 +50,14 @@ async def detect_waf(target, data, logger, client):
                 if not bypassed:
                     # Try rotating UA one last time
                     try:
-                         async with client.get(target) as retrying: # client rotates UA automatically on request
+                         if logger: logger("[-] WAF Bypass Attempt (UA Rotate)...")
+                         async with client.get(target, timeout=5) as retrying: 
                             if retrying.status == 200:
                                 logger("[+] WAF Bypass Successful with UA Rotation!")
                                 data['waf'] += " (Bypassed)"
                                 bypassed = True
                     except: pass
-
+                    
                 if not bypassed:
                     logger("[-] Bypass attempts failed.")
 
